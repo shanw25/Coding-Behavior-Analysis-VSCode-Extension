@@ -12,16 +12,39 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as JSONStream from 'JSONStream';
 import * as https from 'https';
+import * as os from 'os';
+import { send } from 'process';
+const axios = require('axios');
+const { createHash } = require('crypto');
 
 // this method is called when your extension is activated
 // your extension is activated the very first time the command is executed
 export function activate(context: vscode.ExtensionContext) {
+	
+	vscode.commands.registerCommand('extension.selectOption', () => {
+		const options = ['COMP 110', 'COMP 210', 'COMP 301'];
+	
+		vscode.window.showQuickPick(options).then(selection => {
+		if (selection) {
+			// Handle the selected option
+			vscode.window.showInformationMessage(`You selected: ${selection}`);
+		}else{
+			vscode.commands.executeCommand("extension.selectOption");
+		}
+		});
+	});
+
+	vscode.commands.executeCommand("extension.selectOption");
 
 	let tracker = new Tracker();
 	if (!fs.existsSync(context.globalStorageUri.fsPath)){
 		fs.mkdirSync(context.globalStorageUri.fsPath, { recursive: true });
 	}
 	tracker.editLogPath = context.globalStorageUri.fsPath + path.sep + 'editLog.json';
+	// console.log(tracker.editLogPath);
+	// const machineId = getMachineId();
+	// console.log('Machine ID:', machineId);
+	
 	// TODO: need to implement separate command for playing back actions.
 	// reconstruction will happen by first turning off the logging, then building, then turning logging back on
 	context.subscriptions.push(
@@ -31,7 +54,6 @@ export function activate(context: vscode.ExtensionContext) {
 			tracker.initialize();
 		})
 	);
-
 	context.subscriptions.push(tracker);
 	tracker.initialize();
 }
@@ -91,34 +113,93 @@ export class Tracker {
 		  }
 		});
 		this.setupOverridenCommands();
-		setInterval(() => this.sendLogFileToServer(), 60000)
+		this.sendLogFileToServer();
+		setInterval(() => this.sendLogFileToServer(), 10000);
 	}
 	public dispose() : void {
 		this.disposable.dispose();
 	}
 
-	private sendLogFileToServer() {
+	public hash(string) {
+		return createHash('sha256').update(string).digest('hex');
+	}
+
+	public getMachineId(): string {
+		const networkInterfaces = os.networkInterfaces();
+	  
+		// Iterate over network interfaces to find the MAC address
+		for (const [, interfaces] of Object.entries(networkInterfaces)) {
+		  // console.log(interfaces);
+		  for (const iface of interfaces) {
+			// Check if the interface is not a loopback and is not a virtual interface
+			if (!iface.internal && iface.mac && iface.mac !== '00:00:00:00:00:00') {
+			  return this.hash(iface.mac);
+			}
+		  }
+		}
+	  
+		// Return an empty string if the machine ID could not be found
+		return '';
+	}
+
+	private async sendLogFileToServer() {
 		// console.log(fs.readFile(this.editLogPath).toString())
 		fs.readFile(this.editLogPath, (err, data) => {
 			if (err) {
-				console.log(err)
+				console.log(err);
 				return;
 			}
-			if (data.length == 0) return;
-			const options = {
-				hostname: "eo339ttlrnh0yvi.m.pipedream.net",
-				port: 443,
-				path: "/",
-				method: "POST",
-				headers: {
-					"Content-Type": "application/json",
-					"Content-Length": data.length,
-				},
+			if (data.length == 0) {return;}
+
+			const macAddress = this.getMachineId();
+			let dataContent = '[' + data.toString().substring(0, data.length - 1) + ']';
+			console.log(dataContent);
+			let content = JSON.stringify({
+			"body": {
+				"password": "password",
+				"course_id": "TEST_COURSE", // need to specification on the course
+				"machine_id": macAddress, // hashed mac address
+				"log_id": "WEI_TEST", // unique id for user
+				"log_type": "VSCODE_TEST", // VSCODE
+				"log": {
+				"Sample": [dataContent]
+				}
+			}
+			});
+
+			let config = {
+			method: 'post',
+			maxBodyLength: Infinity,
+			url: 'https://us-south.functions.appdomain.cloud/api/v1/web/ORG-UNC-dist-seed-james_dev/cyverse/add-cyverse-log',
+			headers: { 
+				'Content-Type': 'application/json'
+			},
+			data : content
 			};
-			const req = https.request(options);
-			req.write('[' + data.toString().substring(0, data.length - 1) + ']');
-			req.end();
-		})
+
+			axios.request(config)
+			.then((response) => {
+			console.log(JSON.stringify(response.data));
+			})
+			.catch((error) => {
+			console.log(error);
+			});
+
+			// const options = {
+			// 	hostname: "eo339ttlrnh0yvi.m.pipedream.net",
+			// 	port: 443,
+			// 	path: "/",
+			// 	method: "POST",
+			// 	headers: {
+			// 		"Content-Type": "application/json",
+			// 		"Content-Length": data.length,
+			// 	},
+			// };
+			// const req = https.request(options);
+			// console.log(req);
+			// req.write('[' + data.toString().substring(0, data.length - 1) + ']');
+			// req.end();
+		});
 		
 	}
 
@@ -149,7 +230,7 @@ export class Tracker {
 				'fileName': event.fileName,
 				'contents': event.getText()
 			};
-			this.logEdits('save', JSON.stringify(args));
+			this.logEdits('close', JSON.stringify(args));
 		}, this, subscriptions);
 		//capture opening text doc
 		vscode.workspace.onDidOpenTextDocument((event) => {
@@ -315,7 +396,7 @@ export class Tracker {
 							}
 						}
 					}
-				}
+				};
 			}
 		});
 
