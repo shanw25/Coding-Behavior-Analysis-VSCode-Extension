@@ -14,27 +14,34 @@ import * as JSONStream from 'JSONStream';
 import * as https from 'https';
 import * as os from 'os';
 import { send } from 'process';
+import { LOADIPHLPAPI } from 'dns';
+import { serialize } from 'v8';
+
 const axios = require('axios');
 const { createHash } = require('crypto');
 
 // this method is called when your extension is activated
 // your extension is activated the very first time the command is executed
 export function activate(context: vscode.ExtensionContext) {
-	
-	vscode.commands.registerCommand('extension.selectOption', () => {
-		const options = ['COMP 110', 'COMP 210', 'COMP 301'];
-	
-		vscode.window.showQuickPick(options).then(selection => {
-		if (selection) {
-			// Handle the selected option
-			vscode.window.showInformationMessage(`You selected: ${selection}`);
-		}else{
-			vscode.commands.executeCommand("extension.selectOption");
-		}
-		});
-	});
 
-	vscode.commands.executeCommand("extension.selectOption");
+	// // Select course	
+	// vscode.commands.registerCommand('extension.selectOption', () => {
+	// 	const options = ['COMP 110', 'COMP 210', 'COMP 301'];
+	
+	// 	vscode.window.showQuickPick(options).then(selection => {
+	// 	if (selection) {
+	// 		// Handle the selected option
+	// 		vscode.window.showInformationMessage(`You selected: ${selection}`);
+	// 	}else{
+	// 		vscode.commands.executeCommand("extension.selectOption");
+	// 	}
+	// 	});
+	// });
+	// //Execute course selection 
+	// vscode.commands.executeCommand("extension.selectOption");
+
+	let logNameMannager = new LogNameMannager();
+	LogNameMannager.initializeFileStore();
 
 	let tracker = new Tracker();
 	if (!fs.existsSync(context.globalStorageUri.fsPath)){
@@ -42,7 +49,7 @@ export function activate(context: vscode.ExtensionContext) {
 	}
 	tracker.editLogPath = context.globalStorageUri.fsPath + path.sep + 'editLog.json';
 	// console.log(tracker.editLogPath);
-	// const machineId = getMachineId();
+	// const machineId = getMachin]eId();
 	// console.log('Machine ID:', machineId);
 	
 	// TODO: need to implement separate command for playing back actions.
@@ -114,7 +121,7 @@ export class Tracker {
 		});
 		this.setupOverridenCommands();
 		this.sendLogFileToServer();
-		setInterval(() => this.sendLogFileToServer(), 10000);
+		// setInterval(() => this.sendLogFileToServer(), 10000);
 	}
 	public dispose() : void {
 		this.disposable.dispose();
@@ -153,7 +160,7 @@ export class Tracker {
 
 			const macAddress = this.getMachineId();
 			let dataContent = '[' + data.toString().substring(0, data.length - 1) + ']';
-			console.log(dataContent);
+			// console.log(dataContent);
 			let content = JSON.stringify({
 			"body": {
 				"password": "password",
@@ -179,7 +186,7 @@ export class Tracker {
 
 			axios.request(config)
 			.then((response) => {
-			console.log(JSON.stringify(response.data));
+			// console.log(JSON.stringify(response.data));
 			})
 			.catch((error) => {
 			console.log(error);
@@ -537,6 +544,41 @@ export class Tracker {
 		readLogFile.pipe(parseJSONStream);
 	}
 	  
+}
+
+export class LogNameMannager {
+	private static readonly uuidFile: string = "LogsUUID.txt";
+	private static fileStore: fs.PathLike;
+	private static loggedName: string;
+	private static machineId: string;
+	private static cannotSaveName: boolean = false;
+	private static cannotReadName: boolean = false;
+	private static cannotGetHardwareAddress: boolean = false;
+
+	public static initializeFileStore(): void {
+		let searchLoc = path.join(process.env.HOME || '', 'VSCODE-config');
+		if(!fs.existsSync(searchLoc)){
+			try{
+				fs.mkdirSync(searchLoc, {recursive : true});
+				console.log("uuidPath created successful");
+			}catch(err){
+				console.log(err);
+			}
+		}
+		searchLoc = path.join(searchLoc, this.uuidFile);
+		try{
+			fs.appendFileSync(searchLoc, '');
+			console.log("uuidFile created successful");
+		}catch(err){
+			console.log(err);
+		}
+		// if (fs.existsSync(searchLoc)) {
+		// 	this.fileStore = path.join(searchLoc, this.uuidFile);
+		// } else {
+		// 	this.fileStore = this.uuidFile;
+		// }
+	}
+
 }
 
 // this method is called when your extension is deactivated
