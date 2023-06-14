@@ -24,6 +24,9 @@ const { createHash } = require('crypto');
 // your extension is activated the very first time the command is executed
 export function activate(context: vscode.ExtensionContext) {
 
+	const activityBarItem = vscode.ViewColumn
+
+
 	// // Select course	
 	// vscode.commands.registerCommand('extension.selectOption', () => {
 	// 	const options = ['COMP 110', 'COMP 210', 'COMP 301'];
@@ -547,6 +550,7 @@ export class Tracker {
 }
 
 export class LogNameMannager {
+
 	private static readonly uuidFile: string = "LogsUUID.txt";
 	private static fileStore: fs.PathLike;
 	private static loggedName: string;
@@ -554,6 +558,18 @@ export class LogNameMannager {
 	private static cannotSaveName: boolean = false;
 	private static cannotReadName: boolean = false;
 	private static cannotGetHardwareAddress: boolean = false;
+
+	private static maybeInitializeFileStore() : void {
+		if (this.fileStore !== null) {
+			return;
+		}
+		this.initializeFileStore();
+//		File searchLoc = new File(System.getProperty("user.home") + "/helper-config/");
+//		if (searchLoc.exists())
+//			fileStore = new File(System.getProperty("user.home") + "/helper-config/" + uuidFile);
+//		else
+//			fileStore = new File(uuidFile);
+	}
 
 	public static initializeFileStore(): void {
 		let searchLoc = path.join(process.env.HOME || '', 'VSCODE-config');
@@ -579,6 +595,29 @@ export class LogNameMannager {
 		// }
 	}
 
+	public static getRandomID(): string {
+		let val: string = String(Math.random()) + String(Math.random()) + String(Math.random());
+		return val.replace("0.", "");
+	  }
+
+	public static saveLoggedName(aName: string): void {
+		if (this.cannotSaveName) {
+		  return;
+		}
+		try {
+		  this.maybeInitializeFileStore();
+		  if (!fs.existsSync(this.fileStore)) {
+			fs.writeFileSync(this.fileStore, '');
+		  }
+		  fs.writeFileSync(this.fileStore, aName);
+		  fs.chmodSync(this.fileStore, 0o444);
+		} catch (e) {
+		  console.error("Cannot save file: " + e.message);
+		  this.cannotSaveName = true;
+		}
+	  }
+	  
+	  
 }
 
 // this method is called when your extension is deactivated
