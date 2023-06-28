@@ -20,30 +20,42 @@ import { serialize } from 'v8';
 const axios = require('axios');
 const { createHash } = require('crypto');
 
+
 // this method is called when your extension is activated
 // your extension is activated the very first time the command is executed
 export function activate(context: vscode.ExtensionContext) {
 
-	const activityBarItem = vscode.ViewColumn
-
-
-	// // Select course	
-	// vscode.commands.registerCommand('extension.selectOption', () => {
-	// 	const options = ['COMP 110', 'COMP 210', 'COMP 301'];
+	context.subscriptions.push(
+		vscode.commands.registerCommand('catCoding.start', () => {
+		  const panel = vscode.window.createWebviewPanel(
+			'catCoding',
+			'Action Tracking',
+			vscode.ViewColumn.One,
+			{
+			  enableScripts: true
+			}
+		  );
+		let name = LogNameMannager.readSavedName();
+		  panel.webview.html = getWebviewContent();
+		  if(name !== null){
+			name = name.slice(0, -51);
+			console.log(name);
+			panel.webview.postMessage({
+				userName: name
+			});
+		}
+		  // Handle messages from the webview
+		  panel.webview.onDidReceiveMessage(
+			message => {
+				console.log(message);
+				LogNameMannager.setLoggedName(message["userName"]);
+			},
+			undefined,
+			context.subscriptions
+		  );
+		})
+	  );
 	
-	// 	vscode.window.showQuickPick(options).then(selection => {
-	// 	if (selection) {
-	// 		// Handle the selected option
-	// 		vscode.window.showInformationMessage(`You selected: ${selection}`);
-	// 	}else{
-	// 		vscode.commands.executeCommand("extension.selectOption");
-	// 	}
-	// 	});
-	// });
-	// //Execute course selection 
-	// vscode.commands.executeCommand("extension.selectOption");
-
-	let logNameMannager = new LogNameMannager();
 	LogNameMannager.initializeFileStore();
 
 	let tracker = new Tracker();
@@ -67,6 +79,40 @@ export function activate(context: vscode.ExtensionContext) {
 	context.subscriptions.push(tracker);
 	tracker.initialize();
 }
+
+function getWebviewContent() {
+	return `<!DOCTYPE html>
+  <html lang="en">
+  <head>
+	  <meta charset="UTF-8">
+	  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+	  <title>Cat Coding</title>
+  </head>
+  <body>
+		<form id="info">
+		Input Your Desired User Name: <input id="userName" type="text" name="fname" value=""><br>
+		Input Your Course: <input id="courseName" type="text" name="fname" value=""><br><br>
+		</form> 
+		<button onclick="setInfo()">Submit</button>
+  
+	  <script>
+			window.addEventListener('message', event => {
+
+				const name = event.data; // The JSON data our extension sent
+				console.log("test");
+				document.getElementById("userName").value = name["userName"];
+			});
+		  function setInfo() {
+			const vscode = acquireVsCodeApi();
+			var x = document.getElementById("info");
+			vscode.postMessage({
+				userName: x[0].value
+			});
+		  }
+	  </script>
+  </body>
+  </html>`;
+  }
 
 export class Tracker {
 	private disposable : vscode.Disposable;
@@ -130,28 +176,6 @@ export class Tracker {
 		this.disposable.dispose();
 	}
 
-	public hash(string) {
-		return createHash('sha256').update(string).digest('hex');
-	}
-
-	public getMachineId(): string {
-		const networkInterfaces = os.networkInterfaces();
-	  
-		// Iterate over network interfaces to find the MAC address
-		for (const [, interfaces] of Object.entries(networkInterfaces)) {
-		  // console.log(interfaces);
-		  for (const iface of interfaces) {
-			// Check if the interface is not a loopback and is not a virtual interface
-			if (!iface.internal && iface.mac && iface.mac !== '00:00:00:00:00:00') {
-			  return this.hash(iface.mac);
-			}
-		  }
-		}
-	  
-		// Return an empty string if the machine ID could not be found
-		return '';
-	}
-
 	private async sendLogFileToServer() {
 		// console.log(fs.readFile(this.editLogPath).toString())
 		fs.readFile(this.editLogPath, (err, data) => {
@@ -161,16 +185,17 @@ export class Tracker {
 			}
 			if (data.length == 0) {return;}
 
-			const macAddress = this.getMachineId();
+			const macAddress = LogNameMannager.getHashedHardwareAddress();
 			let dataContent = '[' + data.toString().substring(0, data.length - 1) + ']';
-			// console.log(dataContent);
+			let aLoggedName = LogNameMannager.getLoggedName();
+			console.log(aLoggedName);
 			let content = JSON.stringify({
 			"body": {
 				"password": "password",
 				"course_id": "TEST_COURSE", // need to specification on the course
-				"machine_id": macAddress, // hashed mac address
-				"log_id": "WEI_TEST", // unique id for user
-				"log_type": "VSCODE_TEST", // VSCODE
+				"machine_id": aLoggedName, // hashed mac address
+				"log_id": "WEI_TEST", // db assumes unique, override if same
+				"log_type": "VSCODE", // VSCODE
 				"log": {
 				"Sample": [dataContent]
 				}
@@ -553,12 +578,34 @@ export class LogNameMannager {
 
 	private static readonly uuidFile: string = "LogsUUID.txt";
 	private static fileStore: fs.PathLike;
-	private static loggedName: string;
+	private static loggedName: string = null;
 	private static machineId: string;
 	private static cannotSaveName: boolean = false;
 	private static cannotReadName: boolean = false;
 	private static cannotGetHardwareAddress: boolean = false;
 
+	public static hash(string) {
+		return createHash('sha256').update(string).digest('hex');
+	}
+
+	public static getHashedHardwareAddress(): string {
+		const networkInterfaces = os.networkInterfaces();
+	  
+		// Iterate over network interfaces to find the MAC address
+		for (const [, interfaces] of Object.entries(networkInterfaces)) {
+		  // console.log(interfaces);
+		  for (const iface of interfaces) {
+			// Check if the interface is not a loopback and is not a virtual interface
+			if (!iface.internal && iface.mac && iface.mac !== '00:00:00:00:00:00') {
+			  return this.hash(iface.mac);
+			}
+		  }
+		}
+	  
+		// Return an empty string if the machine ID could not be found
+		return '';
+	}
+	  
 	private static maybeInitializeFileStore() : void {
 		if (this.fileStore !== null) {
 			return;
@@ -582,7 +629,9 @@ export class LogNameMannager {
 			}
 		}
 		searchLoc = path.join(searchLoc, this.uuidFile);
+		this.fileStore = searchLoc;
 		try{
+			fs.chmodSync(this.fileStore, 0o777);
 			fs.appendFileSync(searchLoc, '');
 			console.log("uuidFile created successful");
 		}catch(err){
@@ -597,7 +646,7 @@ export class LogNameMannager {
 
 	public static getRandomID(): string {
 		let val: string = String(Math.random()) + String(Math.random()) + String(Math.random());
-		return val.replace("0.", "");
+		return val.replace(/0\./g, "");;
 	  }
 
 	public static saveLoggedName(aName: string): void {
@@ -606,15 +655,82 @@ export class LogNameMannager {
 		}
 		try {
 		  this.maybeInitializeFileStore();
+		  console.log(this.fileStore);
 		  if (!fs.existsSync(this.fileStore)) {
 			fs.writeFileSync(this.fileStore, '');
 		  }
 		  fs.writeFileSync(this.fileStore, aName);
 		  fs.chmodSync(this.fileStore, 0o444);
+		  console.log("Name saved!");
 		} catch (e) {
 		  console.error("Cannot save file: " + e.message);
 		  this.cannotSaveName = true;
 		}
+	  }
+	  
+	public static setLoggedName(aName: string): void {
+		const generatedID: string = this.getRandomID();
+		const loggedName: string = `${aName}(${generatedID})`;
+		console.log(generatedID);
+		this.saveLoggedName(loggedName);
+		// anytime and set username
+	}
+
+	public static getMachineId(): string {
+		if (this.machineId == null) {
+		  this.machineId = this.getHashedHardwareAddress();
+		}
+	  
+		if (this.machineId == null) {
+		  this.machineId = this.readSavedName(); // only needed if we return machine id user id
+		}
+		
+		if (this.machineId == null) {
+		  this.machineId = "R-" + this.getRandomID();
+		}
+	  
+		return this.machineId;
+	}
+
+	public static readSavedName(): string | null {
+		this.maybeInitializeFileStore();
+	  
+		if (!fs.existsSync(this.fileStore) || this.cannotReadName) {
+		  return null;
+		}
+	  
+		let retVal;
+		try {
+		  const data = fs.readFileSync(this.fileStore, 'utf8');
+		  const lines = data.split('\n');
+		  retVal = lines[0];
+		  return retVal;
+		} catch (e) {
+		  this.cannotReadName = true;
+		  return null;
+		}
+	  }
+	  
+	  public static getLoggedName(): string {
+		if (this.loggedName != null) {
+		  return this.loggedName;
+		}
+	  
+		this.loggedName = this.readSavedName();
+		if (this.loggedName != null) {
+		  return this.loggedName;
+		}
+		if (this.loggedName == null) {
+		  this.loggedName = this.getMachineId(); // first save
+	  
+		  // bound to succeed at this point
+		try {
+			this.saveLoggedName(this.loggedName);
+		  } catch (e) {
+			console.log("Could not save logged name: " + this.loggedName);
+		  }
+		}
+		return this.loggedName;
 	  }
 	  
 	  

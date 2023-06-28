@@ -14,30 +14,13 @@
 	],
 	"main": "./out/extension.js",
 	"contributes": {
-		"viewsContainers": {
-			"activitybar": [
-			  {
-				"id": "your-extension-id",
-				"title": "Your Extension Title",
-				"icon": "src/icon/1.png"
-			  }
-			]
-		  },
-		  "views": {
-			"your-extension-id": [
-			  {
-				"id": "your-view-id",
-				"name": "Your View Title",
-				"viewType": "your.view.type"
-			  }
-			]
-		  },
 		"commands": [
 			{
-				"command": "tracker.replayActions",
-				"title": "Playback Actions"
+			  "command": "catCoding.start",
+			  "title": "Edit Info",
+			  "category": "Action Tracking"
 			}
-		]
+		  ]
 	},
 	"scripts": {
 		"vscode:prepublish": "npm run compile",
