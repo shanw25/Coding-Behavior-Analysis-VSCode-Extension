@@ -17,6 +17,7 @@ import { send } from 'process';
 import { LOADIPHLPAPI } from 'dns';
 import { serialize } from 'v8';
 import * as web from './web';
+import { exec } from 'child_process';
 
 const axios = require('axios');
 const { createHash } = require('crypto');
@@ -59,22 +60,23 @@ export function activate(context: vscode.ExtensionContext) {
 	// Save all static info in path in local machine
 	LogNameMannager.initializeFileStore();
 	if(LogNameMannager.getStaticInfo() === null){
+		LogNameMannager.setStaticInfo();
 		LogNameMannager.saveStaticInfo();
 	}else{
 		let infos = LogNameMannager.getStaticInfo();
 		LogNameMannager.machineId = infos[0];
 		LogNameMannager.courseID = infos[1];
 		LogNameMannager.assignmentID = infos[2];
-		console.log(infos);
+		LogNameMannager.logSessionID = infos[3];
 	}
 
 	if(LogNameMannager.getDynamicInfo() === null){
 		LogNameMannager.saveDynamicInfo();
 	}else{
 		let infos = LogNameMannager.getDynamicInfo();
-		LogNameMannager.firstName = infos[1];
-		LogNameMannager.lastName = infos[2];
-		LogNameMannager.pid = infos[3];
+		LogNameMannager.firstName = infos[0];
+		LogNameMannager.lastName = infos[1];
+		LogNameMannager.pid = infos[2];
 	}
 
 	// Setup log file for project under project directory
@@ -157,70 +159,82 @@ export class Tracker {
 		  }
 		});
 		this.setupOverridenCommands();
-		// this.sendLogFileToServer();
-		// setInterval(() => this.sendLogFileToServer(), 10000);
+		this.sendLogFileToServer();
+		setInterval(async () => {
+			const result = await this.sendLogFileToServer();
+		  
+			// Perform actions based on the result
+			if (result === true) {
+			  // Perform specific action
+			  LogNameMannager.updateLogSessionID();
+			  fs.writeFileSync(this.editLogPath, '');
+			}
+		  }, 10000);
 	}
 	public dispose() : void {
 		this.disposable.dispose();
 	}
 
-	private async sendLogFileToServer() {
+	private async sendLogFileToServer(): Promise<boolean> {
 		// console.log(fs.readFile(this.editLogPath).toString())
+		let exceedSize = false;
 		fs.readFile(this.editLogPath, (err, data) => {
 			if (err) {
 				console.log(err);
 				return;
 			}
-			if (data.length == 0) {return;}
+			if (data.length === 0) {return;}
 
 			let dataContent = '[' + data.toString().substring(0, data.length - 1) + ']';
+			dataContent = JSON.parse(dataContent);
+			// console.log(dataContent);
+			let dynamicInfo = LogNameMannager.firstName + "_" + LogNameMannager.lastName + "_" + LogNameMannager.pid;
+
 			let content = JSON.stringify({
 			"body": {
 				"password": "password",
 				"course_id": LogNameMannager.courseID, // need to specification on the course
 				"machine_id": LogNameMannager.machineId, // hashed mac address
-				"log_id": LogNameMannager.machineId + '_' + LogNameMannager.courseID + '_' + LogNameMannager.assignmentID, // db assumes unique, override if same
-				"log_type": "VSCODE", // VSCODE
+				"log_id": LogNameMannager.machineId + '_' + LogNameMannager.courseID + '_' + LogNameMannager.assignmentID + '_' + LogNameMannager.logSessionID, // db assumes unique, override if same
+				"log_type": "VSCODE_TEST", // VSCODE
 				"log": {
-				"Sample": [dataContent]
+					[dynamicInfo]: dataContent
 				}
 			}
 			});
-
-			let config = {
-			method: 'post',
-			maxBodyLength: Infinity,
-			url: 'https://us-south.functions.appdomain.cloud/api/v1/web/ORG-UNC-dist-seed-james_dev/cyverse/add-cyverse-log',
-			headers: { 
-				'Content-Type': 'application/json'
-			},
-			data : content
-			};
-
-			axios.request(config)
-			.then((response) => {
-			// console.log(JSON.stringify(response.data));
-			})
-			.catch((error) => {
-			console.log(error);
-			});
-
-			// const options = {
-			// 	hostname: "eo339ttlrnh0yvi.m.pipedream.net",
-			// 	port: 443,
-			// 	path: "/",
-			// 	method: "POST",
-			// 	headers: {
-			// 		"Content-Type": "application/json",
-			// 		"Content-Length": data.length,
-			// 	},
+			console.log(content);
+			// let config = {
+			// method: 'post',
+			// maxBodyLength: Infinity,
+			// url: 'https://us-south.functions.appdomain.cloud/api/v1/web/ORG-UNC-dist-seed-james_dev/cyverse/add-cyverse-log',
+			// headers: { 
+			// 	'Content-Type': 'application/json'
+			// },
+			// data : content
 			// };
-			// const req = https.request(options);
-			// console.log(req);
-			// req.write('[' + data.toString().substring(0, data.length - 1) + ']');
-			// req.end();
+
+			// axios.request(config)
+			// .then((response) => {
+			// // console.log(JSON.stringify(response.data));
+			// })
+			// .catch((error) => {
+			// console.log(error);
+			// });
+			fs.stat(this.editLogPath, (err, stats) => {
+				if (err) {
+				  console.error('Error occurred while getting file stats:', err);
+				  return;
+				}
+				const fileSizeInBytes = stats.size;
+				const fileSizeInKilobytes = fileSizeInBytes / 1024;
+				const fileSizeInMegabytes = fileSizeInKilobytes / 1024;
+				if(fileSizeInMegabytes >= 19){
+					exceedSize = true;
+				}
+			  });
+
 		});
-		
+		return exceedSize;
 	}
 
 	private setupOverridenCommands(): void {
@@ -573,6 +587,7 @@ export class LogNameMannager {
 	// private static cannotGetHardwareAddress: boolean = false;
 	public static courseID: string;
 	public static assignmentID: string;
+	public static logSessionID: string = "1";
 	public static firstName: string = "defaultFirstName";
 	public static lastName: string = "defaultLastName";
 	public static pid: string = "666666666";
@@ -613,7 +628,8 @@ export class LogNameMannager {
 	}
 
 	public static initializeFileStore(): void {
-		let searchLoc = path.join(process.env.HOME || '', 'VSCODE-config');
+		let searchLoc = path.join(vscode.workspace.workspaceFolders[0].uri.path || '', 'VSCODE-config');
+		console.log(searchLoc);
 		if(!fs.existsSync(searchLoc)){
 			try{
 				fs.mkdirSync(searchLoc, {recursive : true});
@@ -642,7 +658,6 @@ export class LogNameMannager {
 	}
 
 	public static saveStaticInfo(): void{
-		this.setStaticInfo();
 		if (this.cannotSaveStatic) {
 		  return;
 		}
@@ -656,7 +671,8 @@ export class LogNameMannager {
 		  fs.writeFileSync(this.staticFileStore, "\"This is the static info file. Info: MachineID, CourseID, AssignmentID\"" + "\n");
 		  fs.appendFileSync(this.staticFileStore, this.machineId + "\n");
 		  fs.appendFileSync(this.staticFileStore, this.courseID + "\n");
-		  fs.appendFileSync(this.staticFileStore, this.assignmentID);
+		  fs.appendFileSync(this.staticFileStore, this.assignmentID + "\n");
+		  fs.appendFileSync(this.staticFileStore, this.logSessionID);
 		  console.log("Static Info saved!");
 		} catch (e) {
 		  console.error("Cannot save file: " + e.message);
@@ -668,6 +684,7 @@ export class LogNameMannager {
 		this.machineId = this.getHashedHardwareAddress();
 		this.courseID = this.getCourseAndAssignment()[0];
 		this.assignmentID = this.getCourseAndAssignment()[1];
+
 	}
 
 	public static getStaticInfo(){
@@ -679,14 +696,24 @@ export class LogNameMannager {
 		try {
 		  const data = fs.readFileSync(this.staticFileStore, 'utf8');
 		  const lines = data.split('\n');
-		  if(lines.length >= 4){
-			return [lines[1], lines[2], lines[3]];
+		  if(lines.length >= 5){
+			return [lines[1], lines[2], lines[3], lines[4]];
 		  }
 		  return null;
 		} catch (e) {
 		  console.log(e);
 		  return null;
 		}
+	}
+
+	public static updateLogSessionID(): void {
+		let info = this.getStaticInfo();
+		this.machineId = info[0];
+		this.courseID = info[1];
+		this.assignmentID = info[2];
+		this.logSessionID = info[3];
+		this.logSessionID += 1;
+		this.saveStaticInfo();
 	}
 
 	private static getCourseAndAssignment(){
