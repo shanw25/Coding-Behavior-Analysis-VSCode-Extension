@@ -435,6 +435,7 @@ export class Tracker {
 
 		vscode.window.onDidOpenTerminal((event) =>{
 			console.log(vscode.window.terminals.length);
+			vscode.window.terminals[vscode.window.terminals.length-1].sendText('echo lalala');
 		}, this, subscriptions);
 
 		// vscode.debug.onDidTerminateDebugSession((event) =>{
@@ -473,7 +474,7 @@ export class Tracker {
 		// subscriptions.push(refactorDisposable);
 		subscriptions.push(undoDisposable);
 		subscriptions.push(redoDisposable);
-		subscriptions.push(debugConsoleDisposable);
+		// subscriptions.push(debugConsoleDisposable);
 		this.disposable = vscode.Disposable.from(...subscriptions);
 	}
 
