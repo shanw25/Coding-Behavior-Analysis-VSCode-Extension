@@ -18,6 +18,8 @@ import { LOADIPHLPAPI } from 'dns';
 import { serialize } from 'v8';
 import * as web from './web';
 import { exec } from 'child_process';
+import { glob } from 'glob';
+import { DebugProtocol } from 'vscode-debugprotocol';
 
 const axios = require('axios');
 const { createHash } = require('crypto');
@@ -38,18 +40,16 @@ export function activate(context: vscode.ExtensionContext) {
 			  enableScripts: true
 			}
 		  );
-		let dInfo = LogNameMannager.readDynamicInfo();
+		let username = LogNameMannager.readUsername();
 		  panel.webview.html = getWebviewContent();
 			panel.webview.postMessage({
-				firstName: dInfo[0],
-				lastName: dInfo[1],
-				pid: dInfo[2]
+				username: username,
 			});
 		  // Handle messages from the webview
 		  panel.webview.onDidReceiveMessage(
 			message => {
 				console.log(message);
-				LogNameMannager.setDynamicInfo(message);
+				LogNameMannager.updateUsername(message);
 			},
 			undefined,
 			context.subscriptions
@@ -65,18 +65,17 @@ export function activate(context: vscode.ExtensionContext) {
 	}else{
 		let infos = LogNameMannager.getStaticInfo();
 		LogNameMannager.machineId = infos[0];
-		LogNameMannager.courseID = infos[1];
-		LogNameMannager.assignmentID = infos[2];
-		LogNameMannager.logSessionID = infos[3];
+		LogNameMannager.username = infos[1];
 	}
 
 	if(LogNameMannager.getDynamicInfo() === null){
+		LogNameMannager.setDynamicInfo();
 		LogNameMannager.saveDynamicInfo();
 	}else{
 		let infos = LogNameMannager.getDynamicInfo();
-		LogNameMannager.firstName = infos[0];
-		LogNameMannager.lastName = infos[1];
-		LogNameMannager.pid = infos[2];
+		LogNameMannager.courseID = infos[0];
+		LogNameMannager.assignmentID = infos[1];
+		LogNameMannager.logSessionID = infos[2];
 	}
 
 	// Setup log file for project under project directory
@@ -84,17 +83,21 @@ export function activate(context: vscode.ExtensionContext) {
 	if(!fs.existsSync(vscode.workspace.workspaceFolders[0].uri.path + path.sep + "log")){
 		fs.mkdirSync(vscode.workspace.workspaceFolders[0].uri.path + path.sep + "log");
 	}
+
 	tracker.editLogPath = vscode.workspace.workspaceFolders[0].uri.path + path.sep + "log" + path.sep + 'editLog.json';
+
+
 	
 	// TODO: need to implement separate command for playing back actions.
 	// reconstruction will happen by first turning off the logging, then building, then turning logging back on
-	context.subscriptions.push(
-		vscode.commands.registerCommand('tracker.replayActions', function (args) {
-			tracker.dispose();
-			tracker.replayActions();
-			tracker.initialize();
-		})
-	);
+
+	// context.subscriptions.push(
+	// 	vscode.commands.registerCommand('tracker.replayActions', function (args) {
+	// 		tracker.dispose();
+	// 		tracker.replayActions();
+	// 		tracker.initialize();
+	// 	})
+	// );
 	context.subscriptions.push(tracker);
 	tracker.initialize();
 }
@@ -110,9 +113,9 @@ export class Tracker {
 	public editLogPath;
 	private fsWatcher;
 	//TODO: set the above equal to fs.watch in initialize, and then close it when dispose method is called.
+	private readonly maxLogFileSize = 19;
 
 	public initialize() : void {
-		console.log(this.editLogPath);
 		this.editLogFile = fs.createWriteStream(this.editLogPath, { flags: 'a' });
 		
 		//TODO: add fswatcher.close to dipose method, and abstract this away
@@ -125,9 +128,9 @@ export class Tracker {
 		  'position': null,
 		  'arguments': []
 		};
-	
 		//TODO: Fix issue where this is unable to recognize directories with spaces in them.
 		fs.watch(vscode.workspace.workspaceFolders[0].uri.toString().substring(7, vscode.workspace.workspaceFolders[0].uri.toString().length), { recursive: false }, (eventType, fileName) => {
+			console.log(eventType);
 		  if (eventType === 'rename') {
 			let path = vscode.workspace.workspaceFolders[0].uri.toString().substring(7, vscode.workspace.workspaceFolders[0].uri.toString().length);
 	
@@ -158,18 +161,19 @@ export class Tracker {
 			}
 		  }
 		});
+
 		this.setupOverridenCommands();
 		this.sendLogFileToServer();
-		setInterval(async () => {
-			const result = await this.sendLogFileToServer();
+		// setInterval(async () => {
+		// 	const result = await this.sendLogFileToServer();
 		  
-			// Perform actions based on the result
-			if (result === true) {
-			  // Perform specific action
-			  LogNameMannager.updateLogSessionID();
-			  fs.writeFileSync(this.editLogPath, '');
-			}
-		  }, 10000);
+		// 	// Perform actions based on the result
+		// 	if (result === true) {
+		// 	  // Perform specific action
+		// 	  LogNameMannager.updateLogSessionID();
+		// 	  fs.writeFileSync(this.editLogPath, '');
+		// 	}
+		//   }, 10000);
 	}
 	public dispose() : void {
 		this.disposable.dispose();
@@ -188,21 +192,19 @@ export class Tracker {
 			let dataContent = '[' + data.toString().substring(0, data.length - 1) + ']';
 			dataContent = JSON.parse(dataContent);
 			// console.log(dataContent);
-			let dynamicInfo = LogNameMannager.firstName + "_" + LogNameMannager.lastName + "_" + LogNameMannager.pid;
 
 			let content = JSON.stringify({
 			"body": {
 				"password": "password",
 				"course_id": LogNameMannager.courseID, // need to specification on the course
 				"machine_id": LogNameMannager.machineId, // hashed mac address
-				"log_id": LogNameMannager.machineId + '_' + LogNameMannager.courseID + '_' + LogNameMannager.assignmentID + '_' + LogNameMannager.logSessionID, // db assumes unique, override if same
+				"log_id": LogNameMannager.username + '_' + LogNameMannager.courseID + '_' + LogNameMannager.assignmentID + '_' + LogNameMannager.logSessionID, // db assumes unique, override if same
 				"log_type": "VSCODE_TEST", // VSCODE
 				"log": {
-					[dynamicInfo]: dataContent
+					"Sample": dataContent
 				}
 			}
 			});
-			console.log(content);
 			// let config = {
 			// method: 'post',
 			// maxBodyLength: Infinity,
@@ -228,7 +230,7 @@ export class Tracker {
 				const fileSizeInBytes = stats.size;
 				const fileSizeInKilobytes = fileSizeInBytes / 1024;
 				const fileSizeInMegabytes = fileSizeInKilobytes / 1024;
-				if(fileSizeInMegabytes >= 19){
+				if(fileSizeInMegabytes >= this.maxLogFileSize){
 					exceedSize = true;
 				}
 			  });
@@ -308,7 +310,7 @@ export class Tracker {
 				  vscode.env.clipboard.readText().then((text) => {
 					this.logEdits('copy', text);
 				  });
-				// console.log(text);
+				// console.log(text); 
 				// this.logEdits('copy', text);
 				copyDisposable = vscode.commands.registerTextEditorCommand('editor.action.clipboardCopyAction', copyOverride);
 				subscriptions.push(copyDisposable);
@@ -399,7 +401,8 @@ export class Tracker {
 			subscriptions.push(backspaceDisposable);
 		  });
 		};
-	
+		// TODO: record compile error when saving. 
+		// TODO: get stdio
 		//setting up undo override
 	
 		var undoDisposable = vscode.commands.registerCommand('undo', () => {
@@ -419,20 +422,48 @@ export class Tracker {
 		I'm just listening in on the messages that are being passed and logging the ones that are part of the stderr, stdin, and stdout streams. There are other streams
 		that can be listened to as well, but not 100% sure what they do.*/
 
-		var debugConsoleDisposable = vscode.debug.registerDebugAdapterTrackerFactory('*', {
-			createDebugAdapterTracker:(session: vscode.DebugSession) => {
-				return {
-					onDidSendMessage:m => {
-						if (m.type === 'event' && m.event === 'output' && m.body.output) {
-							if (m.body.category === 'stderr' || m.body.category === 'stdin' || m.body.category === 'stdout') {
-								console.log(m);
-								this.logEdits('debugConsole', m);
-							}
-						}
-					}
-				};
-			}
-		});
+
+		vscode.debug.onDidChangeBreakpoints((event) => {
+			var lineNumber = event.added[0]["location"]["range"]["end"]["line"];
+			let lineContent = vscode.window.activeTextEditor.document.lineAt(lineNumber)["b"];
+			let args = {
+				'lineNumber': lineNumber,
+				'contents': lineContent
+			};
+			this.logEdits('addBreakpoint', JSON.stringify(args));
+		}, this, subscriptions);
+
+		vscode.window.onDidOpenTerminal((event) =>{
+			console.log(vscode.window.terminals.length);
+		}, this, subscriptions);
+
+		// vscode.debug.onDidTerminateDebugSession((event) =>{
+		// 	console.log(vscode.window.terminals[0]);
+		// }, this, subscriptions);
+		
+		// var debugConsoleDisposable = vscode.debug.registerDebugAdapterTrackerFactory('*', {
+		// 	createDebugAdapterTracker:(session: vscode.DebugSession) => {
+		// 		return {
+		// 			onDidSendMessage:m => {
+		// 				if (m.type === 'event' && m.event === 'output' && m.body.output) {
+		// 					if (m.body.category === 'stderr' || m.body.category === 'stdin' || m.body.category === 'stdout') {
+		// 						console.log(m);
+		// 						this.logEdits('debugConsole', m);
+		// 					}
+		// 				}else if (m.event === 'exception'){
+		// 					console.log("exception happened");
+		// 				}
+		// 			}
+		// 		};
+		// 	}
+		// });
+		// vscode.debug.onDidReceiveDebugSessionCustomEvent(event => {
+		// 	if (event.event === 'runtimeException') {
+		// 	  const exceptionDetails = event.body as DebugProtocol.ExceptionDetails;
+		// 	  console.error('Runtime Exception:', exceptionDetails);
+		// 	  // Handle the runtime exception here (e.g., display a notification, log it, etc.)
+		// 	}
+		//   });
 
 		subscriptions.push(pasteDisposable);
 		subscriptions.push(copyDisposable);
@@ -570,27 +601,21 @@ export class Tracker {
 		});
 		readLogFile.pipe(parseJSONStream);
 	}
-	  
 }
 
 export class LogNameMannager {
-
 	private static readonly staticInfoFile: string = "staticInfo.txt";
 	private static readonly dynamicInfoFile: string = "dynamicInfo.txt";
 	private static staticFileStore: fs.PathLike;
 	private static dynamicFileStore: fs.PathLike;
-	// private static loggedName: string = null;
 	public static machineId: string;
 	private static cannotSaveStatic: boolean = false;
 	private static cannotSaveDynamic: boolean = false;
 	private static cannotReadName: boolean = false;
-	// private static cannotGetHardwareAddress: boolean = false;
 	public static courseID: string;
 	public static assignmentID: string;
 	public static logSessionID: string = "1";
-	public static firstName: string = "defaultFirstName";
-	public static lastName: string = "defaultLastName";
-	public static pid: string = "666666666";
+	public static username: string = "User";
 
 
 	public static hash(string) {
@@ -628,26 +653,43 @@ export class LogNameMannager {
 	}
 
 	public static initializeFileStore(): void {
-		let searchLoc = path.join(vscode.workspace.workspaceFolders[0].uri.path || '', 'VSCODE-config');
-		console.log(searchLoc);
-		if(!fs.existsSync(searchLoc)){
+		let localDir = path.join(vscode.workspace.workspaceFolders[0].uri.path || '', 'VSCODE-config');
+		let globalDir = path.join(os.homedir() || '', "VSCODE-config");
+		let ioLog = path.join(localDir, "IO-Log");
+		if(!fs.existsSync(localDir)){
 			try{
-				fs.mkdirSync(searchLoc, {recursive : true});
-				console.log("uuidPath created successful");
+				fs.mkdirSync(localDir, {recursive : true});
+				console.log("localDir created successful");
 			}catch(err){
-				console.log(err);
+				console.log("line634" + err);
 			}
 		}
-		this.staticFileStore = path.join(searchLoc, this.staticInfoFile);
-		this.dynamicFileStore = path.join(searchLoc, this.dynamicInfoFile);
+		if(!fs.existsSync(globalDir)){
+			try{
+				fs.mkdirSync(globalDir, {recursive : true});
+				console.log("globalDir created successful");
+			}catch(err){
+				console.log("line642" + err);
+			}
+		}
+		if(!fs.existsSync(ioLog)){
+			try{
+				fs.mkdirSync(ioLog, {recursive: true});
+				console.log("IO log dir created successful");
+			}catch(err){
+				console.log("line680" + err);
+			}
+		}
+		this.staticFileStore = path.join(globalDir, this.staticInfoFile);
+		this.dynamicFileStore = path.join(localDir, this.dynamicInfoFile);
 		try{
 			fs.appendFileSync(this.staticFileStore, '');
 			fs.appendFileSync(this.dynamicFileStore, '');
 			fs.chmodSync(this.staticFileStore, 0o777);
 			fs.chmodSync(this.dynamicFileStore, 0o777);
-			console.log("uuidFiles created successful");
+			console.log("Info files created successful");
 		}catch(err){
-			console.log(err);
+			console.log("line654" + err);
 		}
 	}
 
@@ -662,17 +704,13 @@ export class LogNameMannager {
 		  return;
 		}
 		try {
-		  this.maybeInitializeFileStore();
-		  console.log(this.staticFileStore);
 		  if (!fs.existsSync(this.staticFileStore)) {
 			fs.writeFileSync(this.staticFileStore, '');
 		  }
 		  fs.chmodSync(this.staticFileStore, 0o777);
-		  fs.writeFileSync(this.staticFileStore, "\"This is the static info file. Info: MachineID, CourseID, AssignmentID\"" + "\n");
+		  fs.writeFileSync(this.staticFileStore, "\"This is the static info file. Info: MachineID, username\"" + "\n");
 		  fs.appendFileSync(this.staticFileStore, this.machineId + "\n");
-		  fs.appendFileSync(this.staticFileStore, this.courseID + "\n");
-		  fs.appendFileSync(this.staticFileStore, this.assignmentID + "\n");
-		  fs.appendFileSync(this.staticFileStore, this.logSessionID);
+		  fs.appendFileSync(this.staticFileStore, this.username + "\n");
 		  console.log("Static Info saved!");
 		} catch (e) {
 		  console.error("Cannot save file: " + e.message);
@@ -680,11 +718,9 @@ export class LogNameMannager {
 		}
 	}
 
-	public static setStaticInfo(): void{
+	public static setStaticInfo(){
 		this.machineId = this.getHashedHardwareAddress();
-		this.courseID = this.getCourseAndAssignment()[0];
-		this.assignmentID = this.getCourseAndAssignment()[1];
-
+		this.username = this.username += this.getRandomID();
 	}
 
 	public static getStaticInfo(){
@@ -696,12 +732,12 @@ export class LogNameMannager {
 		try {
 		  const data = fs.readFileSync(this.staticFileStore, 'utf8');
 		  const lines = data.split('\n');
-		  if(lines.length >= 5){
-			return [lines[1], lines[2], lines[3], lines[4]];
+		  if(lines.length >= 3){
+			return [lines[1], lines[2]];
 		  }
 		  return null;
 		} catch (e) {
-		  console.log(e);
+		  console.log("line702" + e);
 		  return null;
 		}
 	}
@@ -724,21 +760,24 @@ export class LogNameMannager {
 		return [course, assignment];
 	}
 
+	public static updateUsername(message){
+		this.username = message['username'] + this.getRandomID();
+		this.saveStaticInfo();
+	}
+
 	public static saveDynamicInfo(): void{
 		if (this.cannotSaveDynamic) {
 		  return;
 		}
 		try {
-		  this.maybeInitializeFileStore();
-		  console.log(this.dynamicFileStore);
 		  if (!fs.existsSync(this.dynamicFileStore)) {
 			fs.writeFileSync(this.dynamicFileStore, '');
 		  }
 		  fs.chmodSync(this.dynamicFileStore, 0o777);
-		  fs.writeFileSync(this.dynamicFileStore, "\"This is the dynamic info file. Info: firstName, lastName, PID\"" + "\n");
-		  fs.appendFileSync(this.dynamicFileStore, this.firstName + "\n");
-		  fs.appendFileSync(this.dynamicFileStore, this.lastName + "\n");
-		  fs.appendFileSync(this.dynamicFileStore, this.pid);
+		  fs.writeFileSync(this.dynamicFileStore, "\"This is the dynamic info file. Info: CourseID, AssignmentID, LogSessionID\"" + "\n");
+		  fs.appendFileSync(this.dynamicFileStore, this.courseID + "\n");
+		  fs.appendFileSync(this.dynamicFileStore, this.assignmentID + "\n");
+		  fs.appendFileSync(this.dynamicFileStore, this.logSessionID);
 		  console.log("Dynamic Info saved!");
 		} catch (e) {
 		  console.error("Cannot save file: " + e.message);
@@ -746,11 +785,9 @@ export class LogNameMannager {
 		}
 	}
 
-	public static setDynamicInfo(infos): void{
-		this.firstName = infos['firstName'];
-		this.lastName = infos['lastName'];
-		this.pid = infos['pid'];
-		this.saveDynamicInfo();
+	public static setDynamicInfo(): void{
+		this.courseID = this.getCourseAndAssignment()[0];
+		this.assignmentID = this.getCourseAndAssignment()[1];
 	}
 
 	public static getDynamicInfo(){
@@ -767,71 +804,28 @@ export class LogNameMannager {
 			}
 			return null;
 		}catch (e){
-			console.log(e);
+			console.log("line769" + e);
 			return null;
 		}
 	}
 
-	// public static getMachineId(): string {
-	// 	if (this.machineId == null) {
-	// 	  this.machineId = this.getHashedHardwareAddress();
-	// 	}
-	  
-	// 	if (this.machineId == null) {
-	// 	  this.machineId = this.readSavedName(); // only needed if we return machine id user id
-	// 	}
-		
-	// 	if (this.machineId == null) {
-	// 	  this.machineId = "R-" + this.getRandomID();
-	// 	}
-	  
-	// 	return this.machineId;
-	// }
-
-	public static readDynamicInfo(): string[] | null { //TODO rewrite
+	public static readUsername(): string{ //TODO rewrite
 		this.maybeInitializeFileStore();
 	  
 		if (!fs.existsSync(this.dynamicFileStore) || this.cannotReadName) {
 		  return null;
 		}
-	  
-		let retVal;
 		try {
-		  const data = fs.readFileSync(this.dynamicFileStore, 'utf8');
+		  const data = fs.readFileSync(this.staticFileStore, 'utf8');
 		  const lines = data.split('\n');
-		  let firstName = lines[1];
 		  let lastName = lines[2];
-		  let pid = lines[3];
-		  return [firstName, lastName, pid];
+		  return lastName;
 		} catch (e) {
+			console.log("line786" + e);
 		  this.cannotReadName = true;
 		  return null;
 		}
 	  }
-	  
-	//   public static getLoggedName(): string {
-	// 	if (this.loggedName != null) {
-	// 	  return this.loggedName;
-	// 	}
-	  
-	// 	this.loggedName = this.readSavedName();
-	// 	if (this.loggedName != null) {
-	// 	  return this.loggedName;
-	// 	}
-	// 	if (this.loggedName == null) {
-	// 	  this.loggedName = this.getMachineId(); // first save
-	  
-	// 	  // bound to succeed at this point
-	// 	try {
-	// 		this.saveStaticInfo();
-	// 	  } catch (e) {
-	// 		console.log("Could not save logged name: " + this.loggedName);
-	// 	  }
-	// 	}
-	// 	return this.loggedName;
-	//   }
-	  
-	  
 }
 
 // this method is called when your extension is deactivated
