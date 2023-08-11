@@ -5,4 +5,4 @@
 3, A new VSCode workspace will pop up with the extension running.<br>
 4, Do some coding in the new workspace.<br>
 5, Check the log locally. <br>
-  - Local log path: {project-root-path}/log/editLog.json
+  - Local log path: {root-path-to-the-project-opened-in-pop-up-workspace}/log/editLog.json
