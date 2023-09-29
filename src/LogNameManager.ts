@@ -64,6 +64,7 @@ export class LogNameMannager {
 	}
 
 	public static initializeFileStore(): void {
+		let temp = vscode.workspace.workspaceFolders[0].uri.path + "VSCODE-config";
 		let localDir = path.join(vscode.workspace.workspaceFolders[0].uri.path || '', 'VSCODE-config');
 		let globalDir = path.join(os.homedir() || '', "VSCODE-config");
 		let ioLog = path.join(localDir, "IO-Log");

@@ -30,7 +30,6 @@ const { createHash } = require('crypto');
 // this method is called when your extension is activated
 // your extension is activated the very first time the command is executed
 export function activate(context: vscode.ExtensionContext) {
-
 	//Init web (For non-static info)
 	context.subscriptions.push(
 		vscode.commands.registerCommand('catCoding.start', () => {
@@ -413,20 +412,24 @@ export class Tracker {
 
 
 		vscode.debug.onDidChangeBreakpoints((event) => {
-			var lineNumber = event.added[0]["location"]["range"]["end"]["line"];
-			let lineContent = vscode.window.activeTextEditor.document.lineAt(lineNumber)["b"];
-			let args = {
-				'lineNumber': lineNumber,
-				'contents': lineContent
-			};
-			this.logEdits('addBreakpoint', JSON.stringify(args));
+			if(event.added.length !== 0){
+				var lineNumber = event.added[0]["location"]["range"]["end"]["line"];
+				let lineContent = vscode.window.activeTextEditor.document.lineAt(lineNumber)["b"];
+				let args = {
+					'lineNumber': lineNumber,
+					'contents': lineContent
+				};
+				this.logEdits('addBreakpoint', JSON.stringify(args));
+			}else if(event.removed.length !== 0){
+				var lineNumber = event.removed[0]["location"]["range"]["end"]["line"];
+				let lineContent = vscode.window.activeTextEditor.document.lineAt(lineNumber)["b"];
+				let args = {
+					'lineNumber': lineNumber,
+					'contents': lineContent
+				};
+				this.logEdits('removeBreakpoint', JSON.stringify(args));
+			}
 		}, this, subscriptions);
-
-		// vscode.window.onDidOpenTerminal((event) => {
-		// 	console.log(vscode.window.terminals);
-		// 	console.log(this.editLogPath);
-		// 	vscode.window.terminals[vscode.window.terminals.length-1].sendText('');
-		// }, this, subscriptions);
 
 		vscode.window.onDidOpenTerminal(async (event) => {
 			var workspaceFolder = vscode.workspace.workspaceFolders[0]["uri"]["path"];
