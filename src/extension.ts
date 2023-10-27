@@ -81,11 +81,11 @@ export function activate(context: vscode.ExtensionContext) {
 
 	// Setup log file for project under project directory
 	let tracker = new Tracker();
-	if (!fs.existsSync(vscode.workspace.workspaceFolders[0].uri.path + path.sep + "log")) {
-		fs.mkdirSync(vscode.workspace.workspaceFolders[0].uri.path + path.sep + "log");
+	if (!fs.existsSync(vscode.workspace.workspaceFolders[0].uri.fsPath + path.sep + "log")) {
+		fs.mkdirSync(vscode.workspace.workspaceFolders[0].uri.fsPath + path.sep + "log");
 	}
 
-	tracker.editLogPath = vscode.workspace.workspaceFolders[0].uri.path + path.sep + "log" + path.sep + 'editLog.json';
+	tracker.editLogPath = vscode.workspace.workspaceFolders[0].uri.fsPath + path.sep + "log" + path.sep + 'editLog.json';
 
 
 
@@ -138,7 +138,7 @@ export class Tracker {
 	}
 
 	private async initializeTerminalLog(): Promise<void> {
-		var workspaceFolder = vscode.workspace.workspaceFolders[0]["uri"]["path"];
+		var workspaceFolder = vscode.workspace.workspaceFolders[0].uri.fsPath;
 		var curTerminal = vscode.window.terminals[vscode.window.terminals.length - 1];
 		var terminalPid = await curTerminal.processId;
 		var fileName = terminalPid + ".txt";
@@ -432,7 +432,7 @@ export class Tracker {
 		}, this, subscriptions);
 
 		vscode.window.onDidOpenTerminal(async (event) => {
-			var workspaceFolder = vscode.workspace.workspaceFolders[0]["uri"]["path"];
+			var workspaceFolder = vscode.workspace.workspaceFolders[0].uri.fsPath;
 			var terminalPid = await event.processId;
 			var fileName = terminalPid + ".txt";
 			var filePath = path.join(workspaceFolder, "VSCODE-config", "IO-Log", fileName);
@@ -445,12 +445,21 @@ export class Tracker {
 		},this,subscriptions);
 
 		vscode.window.onDidCloseTerminal(async (event) => {
-			var workspaceFolder = vscode.workspace.workspaceFolders[0]["uri"]["path"];
+			var workspaceFolder = vscode.workspace.workspaceFolders[0].uri.fsPath;
+			var curTerminal = vscode.window.terminals[vscode.window.terminals.length - 1];
 			var terminalPid = await event.processId;
 			var fileName = terminalPid + ".txt";
 			var filePath = path.join(workspaceFolder, "VSCODE-config", "IO-Log", fileName);
-			var data = fs.readFileSync(filePath, "utf-8");
-			console.log(data);
+			var data;
+			try{
+				data = fs.readFileSync(filePath, "utf-8");
+			}catch(e){
+				fs.writeFile(filePath, "Unable to record terminal log.", (err)=>{
+					console.log(err);
+				});
+				data = fs.readFileSync(filePath, "utf-8");
+			}
+			// console.log(data);
 			this.logEdits("closeTerminal", data);
 			// fs.rm(filePath, (error) => {
 			// 	if(error){

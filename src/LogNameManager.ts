@@ -10,6 +10,7 @@ import { serialize } from 'v8';
 import * as web from './web';
 import { exec } from 'child_process';
 import { glob } from 'glob';
+import { privateEncrypt } from 'crypto';
 
 const axios = require('axios');
 const { createHash } = require('crypto');
@@ -65,8 +66,9 @@ export class LogNameMannager {
 
 	public static initializeFileStore(): void {
 		let temp = vscode.workspace.workspaceFolders[0].uri.path + "VSCODE-config";
-		let localDir = path.join(vscode.workspace.workspaceFolders[0].uri.path || '', 'VSCODE-config');
+		let localDir = path.join(vscode.workspace.workspaceFolders[0].uri.fsPath || '', 'VSCODE-config');
 		let globalDir = path.join(os.homedir() || '', "VSCODE-config");
+		console.log(localDir)
 		let ioLog = path.join(localDir, "IO-Log");
 		if(!fs.existsSync(localDir)){
 			try{
