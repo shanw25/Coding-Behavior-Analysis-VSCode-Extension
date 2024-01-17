@@ -25,7 +25,9 @@ import { error } from 'console';
 
 const axios = require('axios');
 const { createHash } = require('crypto');
-
+const chokidar = require('chokidar');
+let terminalSessions: string[] = [];
+let terminalSessionWatcher;
 
 // this method is called when your extension is activated
 // your extension is activated the very first time the command is executed
@@ -121,6 +123,7 @@ export class Tracker {
 		this.initializeTerminalLog();
 		this.setupOverridenCommands();
 		this.sendLogFileToServer();
+		this.detactTerminalExceptions();
 		// setInterval(async () => {
 		// 	const result = await this.sendLogFileToServer();
 
@@ -137,13 +140,25 @@ export class Tracker {
 		this.fsWatcher.dispose();
 	}
 
+	private fileWatcher(): void {
+		for (let file of terminalSessions){
+			try {
+				let content = fs.readFileSync(file, 'utf8');
+			} catch (err) {
+				console.error(`Error reading file at ${file}:`, err);
+			}
+		}
+	}
+
 	private async initializeTerminalLog(): Promise<void> {
 		var workspaceFolder = vscode.workspace.workspaceFolders[0].uri.fsPath;
 		var curTerminal = vscode.window.terminals[vscode.window.terminals.length - 1];
 		var terminalPid = await curTerminal.processId;
 		var fileName = terminalPid + ".txt";
 		var filePath = path.join(workspaceFolder, "VSCODE-config", "IO-Log", fileName);
-		curTerminal.sendText("script -q -t 0 " + filePath);
+		fs.writeFileSync(filePath, '');
+		fs.chmodSync(filePath, '777');
+		curTerminal.sendText("script -q -F -t 0 " + filePath);
 		let args = {
 			'pid': terminalPid
 		};
@@ -213,6 +228,28 @@ export class Tracker {
 		return exceedSize;
 	}
 
+	private detactTerminalExceptions(): void {
+		const onFileChange = (path) => {
+			console.log(`File ${path} has been changed. Reading new content...`);
+			fs.readFile(path, 'utf8', (err, data) => {
+				if (err) {
+					console.error(`Error reading file: ${err}`);
+					return;
+				}
+				fs.appendFileSync(path, '');
+				console.log(`New content in ${path}: ${data}`);
+			});
+		};
+		terminalSessionWatcher = chokidar.watch(terminalSessions, {
+			ignored: /(^|[\/\\])\../, // ignore dotfiles
+			persistent: true
+		});
+		terminalSessionWatcher
+		.on('change', onFileChange)
+		.on('error', error => console.error(`Watcher error: ${error}`));
+		console.log(`Watching for changes in the following files: ${terminalSessions.join(', ')}`);
+	}
+
 	private setupOverridenCommands(): void {
 		let subscriptions: vscode.Disposable[] = [];
 
@@ -229,7 +266,7 @@ export class Tracker {
 		this.fsWatcher.onDidCreate(uri =>{
 			var path = uri.path;
 			var position = false;
-			this.logEdits('createFile', '', path, position);
+			this.logEdits('createFile', 'createFile', path, position);
 		});
 		// this.fsWatcher.onDidChange(uri =>{
 		// 	console.log("change" + uri);
@@ -237,7 +274,7 @@ export class Tracker {
 		this.fsWatcher.onDidDelete(uri =>{
 			var path = uri.path;
 			var position = false;
-			this.logEdits('deleteFile', '', path, position);
+			this.logEdits('deleteFile', 'deleteFile', path, position);
 		});
 
 		//capture saving text doc
@@ -365,8 +402,27 @@ export class Tracker {
 			if (!editor) {
 				return;
 			}
-			let selection = editor.selection;
-			let text = editor.document.getText(selection);
+			let position = editor.selection.start;
+
+			let text;
+			if (position.character === 0) {
+				// If at the beginning of a line, prepare to delete the line
+				if (position.line === 0) {
+					// If at the beginning of the first line, nothing to delete
+					return;
+				}
+				let line = editor.document.lineAt(position.line);
+				text = line.text + '\n'; // Include the newline character in the deletion
+			} else {
+				// Calculate the position just before the cursor
+				let positionBefore = position.translate(0, -1);
+		
+				// Get the text at the new position
+				let range = new vscode.Range(positionBefore, position);
+				text = editor.document.getText(range);
+			}
+
+
 			this.logEdits('backspace', text);
 			backspaceDisposable.dispose();
 			vscode.commands.executeCommand("deleteLeft").then(() => {
@@ -380,8 +436,26 @@ export class Tracker {
 			if (!editor) {
 				return;
 			}
-			let selection = editor.selection;
-			let text = editor.document.getText(selection);
+			let position = editor.selection.start;
+
+			let text;
+			if (position.character === 0) {
+				// If at the beginning of a line, prepare to delete the line
+				if (position.line === 0) {
+					// If at the beginning of the first line, nothing to delete
+					return;
+				}
+				let line = editor.document.lineAt(position.line);
+				text = line.text + '\n'; // Include the newline character in the deletion
+			} else {
+				// Calculate the position just before the cursor
+				let positionBefore = position.translate(0, -1);
+		
+				// Get the text at the new position
+				let range = new vscode.Range(positionBefore, position);
+				text = editor.document.getText(range);
+			}
+
 			this.logEdits('backspace', text);
 			backspaceDisposable.dispose();
 			vscode.commands.executeCommand("deleteLeft").then(() => {
@@ -436,12 +510,17 @@ export class Tracker {
 			var terminalPid = await event.processId;
 			var fileName = terminalPid + ".txt";
 			var filePath = path.join(workspaceFolder, "VSCODE-config", "IO-Log", fileName);
+			fs.writeFileSync(filePath, '');
+			fs.chmodSync(filePath, '777');
+			terminalSessions.push(filePath);
+			this.detactTerminalExceptions();
 			var curTerminal = vscode.window.terminals[vscode.window.terminals.length - 1];
-			curTerminal.sendText("script -q -t 0 " + filePath);
+			curTerminal.sendText("script -q -F -t 0 " + filePath);
 			let args = {
 				'pid': terminalPid
 			};
 			this.logEdits("openTerminal", JSON.stringify(args));
+
 		},this,subscriptions);
 
 		vscode.window.onDidCloseTerminal(async (event) => {
@@ -451,6 +530,11 @@ export class Tracker {
 			var fileName = terminalPid + ".txt";
 			var filePath = path.join(workspaceFolder, "VSCODE-config", "IO-Log", fileName);
 			var data;
+			let index = terminalSessions.indexOf(filePath);
+			if(index > -1){
+				terminalSessions.splice(index, 1);
+			}
+			this.detactTerminalExceptions();
 			try{
 				data = fs.readFileSync(filePath, "utf-8");
 			}catch(e){
